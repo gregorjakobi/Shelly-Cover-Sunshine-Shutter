@@ -15,12 +15,24 @@ print("Config loaded:", JSON.stringify(CONFIG));
 
 let consecutiveCloudCount = 0; // Count of consecutive cloud detections
 let timer_handle = null; // Timer handle for control
+let hasClosedToday = false; // Track if closing position was triggered today
+let lastDay = new Date().getDate(); // Track last day for reset
 
 function checkWeather() {
   print("Before HTTP call");
-  let hour = new Date().getHours();
-  let minute = new Date().getMinutes();
-  print("Current hour:", hour, "minute:", minute);
+  let now = new Date();
+  let hour = now.getHours();
+  let minute = now.getMinutes();
+  let currentDay = now.getDate();
+  print("Current hour:", hour, "minute:", minute, "day:", currentDay);
+
+  // Reset hasClosedToday on new day
+  if (currentDay !== lastDay) {
+    hasClosedToday = false;
+    lastDay = currentDay;
+    print("New day, reset closing tracker");
+  }
+
   if (hour < CONFIG.startHour || hour >= CONFIG.eveningHour) {
     print("Outside operating hours, checking next start");
     if (hour >= CONFIG.eveningHour) {
@@ -30,7 +42,6 @@ function checkWeather() {
         else print("Blinds successfully set to " + CONFIG.openingPosition + "%");
       });
       if (timer_handle) Timer.clear(timer_handle);
-      let now = new Date();
       let delay = 0;
       try {
         if (hour >= CONFIG.startHour) {
@@ -44,7 +55,7 @@ function checkWeather() {
         print("Next run in", delay / 1000 / 60 / 60, "hours (approx. " + CONFIG.startHour + ":00 tomorrow)");
       } catch (e) {
         print("Timer calc error:", e);
-        timer_handle = Timer.set(CONFIG.checkInterval, true, checkWeather);  // Fallback with config interval
+        timer_handle = Timer.set(CONFIG.checkInterval, true, checkWeather);
         print("Fallback timer started at " + (CONFIG.checkInterval / 1000 / 60) + " mins with handle:", timer_handle);
       }
       return;
@@ -73,10 +84,11 @@ function checkWeather() {
             if (err) print("Error lowering to " + CONFIG.closingPosition + "%:", err);
             else print("Blinds successfully set to " + CONFIG.closingPosition + "%");
           });
+          hasClosedToday = true;  // Mark as closed today
           consecutiveCloudCount = 0;  // Reset counter
         } else {
           print("Condition for lowering not met");
-          if (temp <= CONFIG.tempThreshold) {
+          if (temp <= CONFIG.tempThreshold && hasClosedToday) {
             print("Temp too low, raising to " + CONFIG.openingPosition + "%");
             Shelly.call("Cover.GoToPosition", {id: 0, pos: CONFIG.openingPosition}, function(err) {
               if (err) print("Error raising to " + CONFIG.openingPosition + "%:", err);
@@ -86,7 +98,7 @@ function checkWeather() {
           } else if (clouds >= CONFIG.cloudThreshold) {
             consecutiveCloudCount += 1;  // Increment counter
             print("Clouds detected, consecutive count:", consecutiveCloudCount);
-            if (consecutiveCloudCount >= CONFIG.cloudConsecutiveThreshold) {
+            if (consecutiveCloudCount >= CONFIG.cloudConsecutiveThreshold && hasClosedToday) {
               print("Clouds detected multiple times, raising to " + CONFIG.openingPosition + "%");
               Shelly.call("Cover.GoToPosition", {id: 0, pos: CONFIG.openingPosition}, function(err) {
                 if (err) print("Error raising to " + CONFIG.openingPosition + "%:", err);
